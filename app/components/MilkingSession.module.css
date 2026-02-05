@@ -1,0 +1,173 @@
+.container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  padding: 1rem;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: #fff;
+}
+
+.header {
+  width: 100%;
+  max-width: 600px;
+  text-align: center;
+  margin-bottom: 2rem;
+}
+
+.header h1 {
+  font-size: 2rem;
+  margin-bottom: 0.5rem;
+  font-weight: 700;
+}
+
+.connectionStatus {
+  font-size: 0.875rem;
+  opacity: 0.9;
+}
+
+.connected {
+  color: #4ade80;
+}
+
+.disconnected {
+  color: #f87171;
+}
+
+.userInput {
+  width: 100%;
+  max-width: 400px;
+  margin-bottom: 2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.userInput label {
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+
+.userInput input {
+  padding: 0.75rem;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-radius: 0.5rem;
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+  font-size: 1rem;
+  backdrop-filter: blur(10px);
+}
+
+.userInput input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.userInput input::placeholder {
+  color: rgba(255, 255, 255, 0.5);
+}
+
+/* Big Timer Display */
+.timerContainer {
+  width: 100%;
+  max-width: 400px;
+  text-align: center;
+  margin-bottom: 3rem;
+}
+
+.timer {
+  font-size: 4rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.1em;
+  margin-bottom: 0.5rem;
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+  line-height: 1;
+}
+
+.timerLabel {
+  font-size: 1.25rem;
+  opacity: 0.9;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
+/* Control Buttons */
+.controls {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 1rem;
+  width: 100%;
+  max-width: 400px;
+  margin-bottom: 2rem;
+}
+
+.button {
+  padding: 1rem 2rem;
+  font-size: 1.125rem;
+  font-weight: 600;
+  border: none;
+  border-radius: 0.75rem;
+  background: rgba(255, 255, 255, 0.2);
+  color: #fff;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  backdrop-filter: blur(10px);
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  min-height: 60px;
+}
+
+.button:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.3);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+.button:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.stopButton {
+  grid-column: 1 / -1;
+  background: rgba(239, 68, 68, 0.3);
+  border-color: rgba(239, 68, 68, 0.5);
+}
+
+.stopButton:hover:not(:disabled) {
+  background: rgba(239, 68, 68, 0.4);
+}
+
+.musicStatus {
+  font-size: 0.875rem;
+  opacity: 0.8;
+  text-align: center;
+}
+
+/* Responsive Design */
+@media (min-width: 768px) {
+  .timer {
+    font-size: 6rem;
+  }
+
+  .controls {
+    grid-template-columns: repeat(4, 1fr);
+  }
+
+  .stopButton {
+    grid-column: auto;
+  }
+}
+
+@media (min-width: 992px) {
+  .timer {
+    font-size: 8rem;
+  }
+}

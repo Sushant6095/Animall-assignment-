@@ -1,0 +1,28 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql" // Change to "mysql" if using MySQL
+  url      = env("DATABASE_URL")
+}
+
+model MilkingSession {
+  id            String   @id @default(uuid())
+  userId        String
+  startTime     DateTime
+  endTime       DateTime
+  duration      Int      // Duration in seconds
+  elapsedTime   Float    // Actual elapsed time in seconds (excluding paused time)
+  pausedTime    Float    // Total time spent paused in seconds
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([userId, startTime]) // Ensure idempotency: one session per user per start time
+  @@map("milking_sessions")
+  @@index([userId])
+  @@index([startTime])
+}
