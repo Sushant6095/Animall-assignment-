@@ -30,6 +30,9 @@ const withTimeout = <T>(promise: Promise<T>, timeoutMs: number, errorMessage: st
  * - userId: string (required) - User ID to fetch sessions for
  */
 router.get('/sessions', async (req: Request, res: Response) => {
+  const startTime = Date.now();
+  console.log(`[Sessions] Request received for userId: ${req.query.userId}`);
+  
   try {
     const { userId } = req.query;
 
@@ -40,24 +43,34 @@ router.get('/sessions', async (req: Request, res: Response) => {
       });
     }
 
-    // Check Redis cache first (with timeout)
+    // Check Redis cache first (with shorter timeout to fail fast)
     const historyKey = getHistoryKey(userId);
     let cachedData: string | null = null;
     try {
-      cachedData = await withTimeout(
+      console.log(`[Sessions] Checking Redis cache for key: ${historyKey}`);
+      // Use a very short timeout for Redis to fail fast
+      cachedData = await Promise.race([
         get(historyKey),
-        3000, // 3 second timeout for Redis
-        'Redis operation timed out'
-      );
+        new Promise<string | null>((resolve) => 
+          setTimeout(() => {
+            console.warn('[Sessions] Redis operation timed out, skipping cache');
+            resolve(null);
+          }, 1500) // 1.5 second timeout - fail fast
+        )
+      ]);
+      console.log(`[Sessions] Redis cache ${cachedData ? 'hit' : 'miss'}`);
     } catch (redisError: any) {
       // Redis timeout or error - continue to database query
-      console.warn('Redis cache check failed or timed out:', redisError?.message);
+      console.warn(`[Sessions] Redis cache check failed: ${redisError?.message}`);
+      cachedData = null; // Ensure it's null
     }
 
     if (cachedData) {
       // Cache hit - return cached data
       try {
         const sessions = JSON.parse(cachedData);
+        const duration = Date.now() - startTime;
+        console.log(`[Sessions] Returning cached data (${sessions.length} sessions) in ${duration}ms`);
         return res.status(200).json({
           userId,
           sessions,
@@ -65,11 +78,12 @@ router.get('/sessions', async (req: Request, res: Response) => {
         });
       } catch (parseError) {
         // Invalid cache data - continue to database query
-        console.warn('Failed to parse cached data, fetching from database');
+        console.warn('[Sessions] Failed to parse cached data, fetching from database');
       }
     }
 
     // Cache miss - fetch from Prisma (with timeout)
+    console.log(`[Sessions] Fetching from database for userId: ${userId}`);
     let sessions = [];
     try {
       sessions = await withTimeout(
@@ -81,21 +95,26 @@ router.get('/sessions', async (req: Request, res: Response) => {
             startTime: 'desc', // Sort by startTime descending (newest first)
           },
         }),
-        5000, // 5 second timeout for database
+        4000, // 4 second timeout for database (reduced from 5s)
         'Database query timed out'
       );
+      console.log(`[Sessions] Database query successful, found ${sessions.length} sessions`);
 
       // Cache the result in Redis with TTL (if we got data) - don't wait for this
       if (sessions.length > 0) {
         setWithTTL(historyKey, JSON.stringify(sessions), HISTORY_CACHE_TTL_SECONDS).catch((err) => {
           // Ignore Redis caching errors
-          console.warn('Failed to cache session history:', err?.message);
+          console.warn('[Sessions] Failed to cache session history:', err?.message);
         });
       }
     } catch (dbError: any) {
       // Handle database errors gracefully
+      console.error(`[Sessions] Database error:`, dbError?.message || dbError);
+      
       if (dbError?.message?.includes('timed out')) {
-        console.warn('Database query timed out - returning empty array');
+        console.warn('[Sessions] Database query timed out - returning empty array');
+        const duration = Date.now() - startTime;
+        console.log(`[Sessions] Request completed in ${duration}ms (timeout)`);
         return res.status(200).json({
           userId,
           sessions: [],
@@ -105,7 +124,9 @@ router.get('/sessions', async (req: Request, res: Response) => {
       }
       if (dbError?.message?.includes('does not exist') || dbError?.code === '42P01' || dbError?.code === 'P1001') {
         // Database unavailable or table doesn't exist
-        console.warn('Database unavailable for session history - returning empty array');
+        console.warn('[Sessions] Database unavailable - returning empty array');
+        const duration = Date.now() - startTime;
+        console.log(`[Sessions] Request completed in ${duration}ms (DB unavailable)`);
         return res.status(200).json({
           userId,
           sessions: [],
@@ -118,15 +139,19 @@ router.get('/sessions', async (req: Request, res: Response) => {
     }
 
     // Return sorted sessions
+    const duration = Date.now() - startTime;
+    console.log(`[Sessions] Request completed successfully in ${duration}ms`);
     return res.status(200).json({
       userId,
       sessions,
       cached: false,
     });
-  } catch (error) {
-    console.error('Error fetching sessions:', error);
+  } catch (error: any) {
+    const duration = Date.now() - startTime;
+    console.error(`[Sessions] Error after ${duration}ms:`, error?.message || error);
     return res.status(500).json({
       error: 'Failed to fetch sessions',
+      message: error?.message || 'Unknown error',
     });
   }
 });

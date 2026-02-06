@@ -109,9 +109,21 @@ export const get = async (key: string): Promise<string | null> => {
   try {
     const client = getRedisClient();
     if (!client.isOpen) {
-      await client.connect();
+      // Add timeout for connection attempt
+      await Promise.race([
+        client.connect(),
+        new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Redis connection timeout')), 2000)
+        )
+      ]);
     }
-    return await client.get(key);
+    // Add timeout for get operation
+    return await Promise.race([
+      client.get(key),
+      new Promise<string | null>((_, reject) => 
+        setTimeout(() => reject(new Error('Redis get operation timeout')), 2000)
+      )
+    ]);
   } catch (error) {
     // Return null if Redis is unavailable
     return null;
