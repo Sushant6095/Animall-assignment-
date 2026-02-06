@@ -62,7 +62,7 @@ export const handleSessionStart = async (
     socket.data.userId = userId;
 
     // Start server-side timer
-    const io = socket.server;
+    const io = socket.nsp.server;
     startSessionTimer(io, userId);
 
     // Emit SESSION_STARTED event
@@ -153,7 +153,7 @@ export const handleSessionResume = async (
     }
 
     // Ensure timer is running
-    const io = socket.server;
+    const io = socket.nsp.server;
     startSessionTimer(io, userId);
 
     // Emit SESSION_RESUMED event
@@ -273,7 +273,7 @@ export const handleSessionSync = async (
 
     // Resume timer if session is active (recovery logic)
     if (session.status === SessionStatus.ACTIVE) {
-      const io = socket.server;
+      const io = socket.nsp.server;
       startSessionTimer(io, userId);
     }
 
@@ -324,7 +324,7 @@ export const recoverSessionOnReconnect = async (
 
     // Resume timer if session is active
     if (session.status === SessionStatus.ACTIVE) {
-      const io = socket.server;
+      const io = socket.nsp.server;
       startSessionTimer(io, userId);
     }
 

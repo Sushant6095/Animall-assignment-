@@ -1,4 +1,4 @@
-import app, { createHttpServer } from './app';
+import createApp, { createHttpServer } from './app';
 import { config } from './config/env';
 import { initializeSocketIO } from './socket/socket-handler';
 
@@ -8,6 +8,9 @@ import { initializeSocketIO } from './socket/socket-handler';
 const startServer = () => {
   try {
     const port = config.port;
+
+    // Create Express app
+    const app = createApp();
 
     // Create HTTP server (required for Socket.IO)
     const httpServer = createHttpServer(app);
