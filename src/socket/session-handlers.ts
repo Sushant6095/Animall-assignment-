@@ -21,6 +21,7 @@ import {
   unregisterUserSocket,
 } from './session-timer';
 import { persistCompletedSession } from '../utils/session-persistence';
+import { getSocketIO } from './socket-handler';
 
 /**
  * Handle SESSION_START event
@@ -62,7 +63,10 @@ export const handleSessionStart = async (
     socket.data.userId = userId;
 
     // Start server-side timer
-    const io = socket.nsp.server;
+    const io = getSocketIO();
+    if (!io) {
+      throw new Error('Socket.IO server not initialized');
+    }
     startSessionTimer(io, userId);
 
     // Emit SESSION_STARTED event
@@ -153,7 +157,10 @@ export const handleSessionResume = async (
     }
 
     // Ensure timer is running
-    const io = socket.nsp.server;
+    const io = getSocketIO();
+    if (!io) {
+      throw new Error('Socket.IO server not initialized');
+    }
     startSessionTimer(io, userId);
 
     // Emit SESSION_RESUMED event
@@ -273,8 +280,10 @@ export const handleSessionSync = async (
 
     // Resume timer if session is active (recovery logic)
     if (session.status === SessionStatus.ACTIVE) {
-      const io = socket.nsp.server;
-      startSessionTimer(io, userId);
+      const io = getSocketIO();
+      if (io) {
+        startSessionTimer(io, userId);
+      }
     }
 
     // Emit SESSION_SYNC response with current state
@@ -324,8 +333,10 @@ export const recoverSessionOnReconnect = async (
 
     // Resume timer if session is active
     if (session.status === SessionStatus.ACTIVE) {
-      const io = socket.nsp.server;
-      startSessionTimer(io, userId);
+      const io = getSocketIO();
+      if (io) {
+        startSessionTimer(io, userId);
+      }
     }
 
     // Emit SESSION_STATE for recovery

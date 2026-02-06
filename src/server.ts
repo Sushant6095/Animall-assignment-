@@ -1,3 +1,4 @@
+import { Express } from 'express';
 import createApp, { createHttpServer } from './app';
 import { config } from './config/env';
 import { initializeSocketIO } from './socket/socket-handler';
@@ -10,7 +11,7 @@ const startServer = () => {
     const port = config.port;
 
     // Create Express app
-    const app = createApp();
+    const app: Express = createApp();
 
     // Create HTTP server (required for Socket.IO)
     const httpServer = createHttpServer(app);
