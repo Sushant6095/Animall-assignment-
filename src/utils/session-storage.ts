@@ -1,4 +1,4 @@
-import { get, setWithTTL, del, getTTL } from './redis';
+import { get, setWithTTL, del, getTTL, isRedisConnected } from './redis';
 import { getActiveSessionKey } from '../constants/redis-keys';
 
 /**
@@ -29,6 +29,11 @@ export interface ActiveSession {
 }
 
 /**
+ * In-memory fallback storage for when Redis is unavailable
+ */
+const inMemorySessions = new Map<string, { session: ActiveSession; expiresAt: number }>();
+
+/**
  * Create a new active session
  * 
  * @param userId - User ID
@@ -51,7 +56,26 @@ export const createSession = async (
   };
 
   const sessionKey = getActiveSessionKey(userId);
-  await setWithTTL(sessionKey, JSON.stringify(session), ttlSeconds);
+  const redisAvailable = await isRedisConnected();
+  
+  if (redisAvailable) {
+    try {
+      await setWithTTL(sessionKey, JSON.stringify(session), ttlSeconds);
+    } catch (error) {
+      // Fallback to in-memory if Redis write fails
+      console.warn('Redis write failed, using in-memory storage');
+      inMemorySessions.set(sessionKey, {
+        session,
+        expiresAt: now + ttlSeconds * 1000,
+      });
+    }
+  } else {
+    // Use in-memory storage when Redis is unavailable
+    inMemorySessions.set(sessionKey, {
+      session,
+      expiresAt: now + ttlSeconds * 1000,
+    });
+  }
 
   return session;
 };
@@ -63,19 +87,32 @@ export const createSession = async (
  * @returns Session object if exists, null otherwise
  */
 export const getSession = async (userId: string): Promise<ActiveSession | null> => {
-  try {
-    const sessionKey = getActiveSessionKey(userId);
-    const sessionData = await get(sessionKey);
-
-    if (!sessionData) {
+  const sessionKey = getActiveSessionKey(userId);
+  const redisAvailable = await isRedisConnected();
+  
+  if (redisAvailable) {
+    try {
+      const sessionData = await get(sessionKey);
+      if (sessionData) {
+        return JSON.parse(sessionData) as ActiveSession;
+      }
+    } catch (error) {
+      console.warn('Redis read failed, checking in-memory storage');
+    }
+  }
+  
+  // Fallback to in-memory storage
+  const inMemoryData = inMemorySessions.get(sessionKey);
+  if (inMemoryData) {
+    // Check if expired
+    if (Date.now() > inMemoryData.expiresAt) {
+      inMemorySessions.delete(sessionKey);
       return null;
     }
-
-    return JSON.parse(sessionData) as ActiveSession;
-  } catch (error) {
-    console.error(`Failed to fetch session for user ${userId}:`, error);
-    return null;
+    return inMemoryData.session;
   }
+  
+  return null;
 };
 
 /**
@@ -115,7 +152,24 @@ export const updateElapsedTime = async (userId: string): Promise<ActiveSession |
 
     // Extend TTL to ensure session doesn't expire during active use
     // Refresh TTL to default value to give full time window
-    await setWithTTL(sessionKey, JSON.stringify(session), DEFAULT_SESSION_TTL_SECONDS);
+    const redisAvailable = await isRedisConnected();
+    if (redisAvailable) {
+      try {
+        await setWithTTL(sessionKey, JSON.stringify(session), DEFAULT_SESSION_TTL_SECONDS);
+      } catch (error) {
+        // Fallback to in-memory
+        inMemorySessions.set(sessionKey, {
+          session,
+          expiresAt: Date.now() + DEFAULT_SESSION_TTL_SECONDS * 1000,
+        });
+      }
+    } else {
+      // Update in-memory storage
+      inMemorySessions.set(sessionKey, {
+        session,
+        expiresAt: Date.now() + DEFAULT_SESSION_TTL_SECONDS * 1000,
+      });
+    }
 
     return session;
   } catch (error) {
@@ -153,11 +207,28 @@ export const pauseSession = async (userId: string): Promise<ActiveSession | null
 
     // Update session with TTL extension
     const sessionKey = getActiveSessionKey(userId);
-    let currentTTL = await getTTL(sessionKey);
-    if (currentTTL < 0) {
-      currentTTL = DEFAULT_SESSION_TTL_SECONDS;
+    const redisAvailable = await isRedisConnected();
+    if (redisAvailable) {
+      try {
+        let currentTTL = await getTTL(sessionKey);
+        if (currentTTL < 0) {
+          currentTTL = DEFAULT_SESSION_TTL_SECONDS;
+        }
+        await setWithTTL(sessionKey, JSON.stringify(session), DEFAULT_SESSION_TTL_SECONDS);
+      } catch (error) {
+        // Fallback to in-memory
+        inMemorySessions.set(sessionKey, {
+          session,
+          expiresAt: Date.now() + DEFAULT_SESSION_TTL_SECONDS * 1000,
+        });
+      }
+    } else {
+      // Update in-memory storage
+      inMemorySessions.set(sessionKey, {
+        session,
+        expiresAt: Date.now() + DEFAULT_SESSION_TTL_SECONDS * 1000,
+      });
     }
-    await setWithTTL(sessionKey, JSON.stringify(session), DEFAULT_SESSION_TTL_SECONDS);
 
     return session;
   } catch (error) {
@@ -197,11 +268,28 @@ export const resumeSession = async (userId: string): Promise<ActiveSession | nul
 
     // Update session with TTL extension
     const sessionKey = getActiveSessionKey(userId);
-    let currentTTL = await getTTL(sessionKey);
-    if (currentTTL < 0) {
-      currentTTL = DEFAULT_SESSION_TTL_SECONDS;
+    const redisAvailable = await isRedisConnected();
+    if (redisAvailable) {
+      try {
+        let currentTTL = await getTTL(sessionKey);
+        if (currentTTL < 0) {
+          currentTTL = DEFAULT_SESSION_TTL_SECONDS;
+        }
+        await setWithTTL(sessionKey, JSON.stringify(session), DEFAULT_SESSION_TTL_SECONDS);
+      } catch (error) {
+        // Fallback to in-memory
+        inMemorySessions.set(sessionKey, {
+          session,
+          expiresAt: Date.now() + DEFAULT_SESSION_TTL_SECONDS * 1000,
+        });
+      }
+    } else {
+      // Update in-memory storage
+      inMemorySessions.set(sessionKey, {
+        session,
+        expiresAt: Date.now() + DEFAULT_SESSION_TTL_SECONDS * 1000,
+      });
     }
-    await setWithTTL(sessionKey, JSON.stringify(session), DEFAULT_SESSION_TTL_SECONDS);
 
     return session;
   } catch (error) {
@@ -217,13 +305,24 @@ export const resumeSession = async (userId: string): Promise<ActiveSession | nul
  * @returns true if session was deleted, false if it didn't exist
  */
 export const deleteSession = async (userId: string): Promise<boolean> => {
-  try {
-    const sessionKey = getActiveSessionKey(userId);
-    const deleted = await del(sessionKey);
-    return deleted > 0;
-  } catch (error) {
-    console.error(`Failed to delete session for user ${userId}:`, error);
-    return false;
+  const sessionKey = getActiveSessionKey(userId);
+  const redisAvailable = await isRedisConnected();
+  
+  let deleted = false;
+  if (redisAvailable) {
+    try {
+      const redisDeleted = await del(sessionKey);
+      deleted = redisDeleted > 0;
+    } catch (error) {
+      console.warn('Redis delete failed, checking in-memory storage');
+    }
   }
+  
+  // Also delete from in-memory storage
+  if (inMemorySessions.delete(sessionKey)) {
+    deleted = true;
+  }
+  
+  return deleted;
 };
 

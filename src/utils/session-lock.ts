@@ -1,10 +1,15 @@
-import { setNxWithTTL, del, exists } from './redis';
+import { setNxWithTTL, del, exists, isRedisConnected } from './redis';
 import { getMilkingLockKey } from '../constants/redis-keys';
 
 /**
  * Default TTL for session locks (5 minutes)
  */
 const DEFAULT_LOCK_TTL_SECONDS = 300;
+
+/**
+ * In-memory fallback for locks when Redis is unavailable
+ */
+const inMemoryLocks = new Map<string, number>(); // userId -> expiration timestamp
 
 /**
  * Acquire a distributed lock for a milking session
@@ -19,22 +24,34 @@ export const acquireSessionLock = async (
   userId: string,
   ttlSeconds: number = DEFAULT_LOCK_TTL_SECONDS
 ): Promise<boolean> => {
-  try {
-    const lockKey = getMilkingLockKey(userId);
-    const lockValue = `locked:${Date.now()}`;
-    
-    const acquired = await setNxWithTTL(lockKey, lockValue, ttlSeconds);
-    
-    if (!acquired) {
-      return false; // Lock already exists, fail gracefully
+  const lockKey = getMilkingLockKey(userId);
+  const redisAvailable = await isRedisConnected();
+  
+  if (redisAvailable) {
+    try {
+      const lockValue = `locked:${Date.now()}`;
+      const acquired = await setNxWithTTL(lockKey, lockValue, ttlSeconds);
+      
+      if (!acquired) {
+        return false; // Lock already exists
+      }
+      
+      return true;
+    } catch (error) {
+      console.warn('Redis lock failed, using in-memory lock');
     }
-    
-    return true;
-  } catch (error) {
-    // Fail gracefully - log error but don't throw
-    console.error(`Failed to acquire session lock for user ${userId}:`, error);
-    return false;
   }
+  
+  // Fallback to in-memory lock
+  const now = Date.now();
+  const existingLock = inMemoryLocks.get(userId);
+  if (existingLock && existingLock > now) {
+    return false; // Lock already exists and hasn't expired
+  }
+  
+  // Acquire lock
+  inMemoryLocks.set(userId, now + ttlSeconds * 1000);
+  return true;
 };
 
 /**
@@ -45,16 +62,25 @@ export const acquireSessionLock = async (
  * @throws Error if Redis operation fails
  */
 export const releaseSessionLock = async (userId: string): Promise<boolean> => {
-  try {
-    const lockKey = getMilkingLockKey(userId);
-    const deleted = await del(lockKey);
-    
-    return deleted > 0; // Returns true if key was deleted (existed)
-  } catch (error) {
-    // Fail gracefully - log error but don't throw
-    console.error(`Failed to release session lock for user ${userId}:`, error);
-    return false;
+  const lockKey = getMilkingLockKey(userId);
+  const redisAvailable = await isRedisConnected();
+  
+  let released = false;
+  if (redisAvailable) {
+    try {
+      const deleted = await del(lockKey);
+      released = deleted > 0;
+    } catch (error) {
+      console.warn('Redis lock release failed, checking in-memory');
+    }
   }
+  
+  // Also release from in-memory
+  if (inMemoryLocks.delete(userId)) {
+    released = true;
+  }
+  
+  return released;
 };
 
 /**
@@ -64,11 +90,27 @@ export const releaseSessionLock = async (userId: string): Promise<boolean> => {
  * @returns true if lock exists, false otherwise
  */
 export const hasSessionLock = async (userId: string): Promise<boolean> => {
-  try {
-    const lockKey = getMilkingLockKey(userId);
-    return await exists(lockKey);
-  } catch (error) {
-    console.error(`Failed to check session lock for user ${userId}:`, error);
-    return false;
+  const lockKey = getMilkingLockKey(userId);
+  const redisAvailable = await isRedisConnected();
+  
+  if (redisAvailable) {
+    try {
+      return await exists(lockKey);
+    } catch (error) {
+      console.warn('Redis lock check failed, checking in-memory');
+    }
   }
+  
+  // Check in-memory lock
+  const lockExpiry = inMemoryLocks.get(userId);
+  if (lockExpiry) {
+    if (Date.now() < lockExpiry) {
+      return true; // Lock exists and hasn't expired
+    } else {
+      // Lock expired, clean it up
+      inMemoryLocks.delete(userId);
+    }
+  }
+  
+  return false;
 };

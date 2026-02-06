@@ -2,6 +2,8 @@ import { createClient, RedisClientType } from 'redis';
 import { config } from '../config/env';
 
 let redisClient: RedisClientType | null = null;
+let lastErrorLogTime = 0;
+const ERROR_LOG_THROTTLE_MS = 10000; // Only log errors every 10 seconds
 
 export const getRedisClient = (): RedisClientType => {
   if (redisClient) {
@@ -15,20 +17,28 @@ export const getRedisClient = (): RedisClientType => {
       host: config.redisHost,
       port: config.redisPort,
       reconnectStrategy: (retries) => {
-        if (retries > 10) {
-          return new Error('Too many reconnection attempts');
+        // Stop reconnecting after 3 attempts to reduce spam
+        if (retries > 3) {
+          return false; // Stop reconnecting
         }
-        return Math.min(retries * 100, 3000);
+        return Math.min(retries * 500, 2000);
       },
     },
   });
 
   client.on('error', (err) => {
-    console.error('Redis Client Error:', err);
+    const now = Date.now();
+    // Throttle error logging to prevent spam
+    if (now - lastErrorLogTime > ERROR_LOG_THROTTLE_MS) {
+      console.error('Redis Client Error (Redis server may not be running):', err.message);
+      console.error('To fix: Start Redis server or set REDIS_URL environment variable');
+      lastErrorLogTime = now;
+    }
   });
 
   client.on('connect', () => {
     console.log('Redis Client Connected');
+    lastErrorLogTime = 0; // Reset error log throttle on successful connection
   });
 
   client.on('disconnect', () => {
@@ -40,15 +50,25 @@ export const getRedisClient = (): RedisClientType => {
 };
 
 export const connectRedis = async (): Promise<void> => {
-  const client = getRedisClient();
-  if (!client.isOpen) {
-    await client.connect();
+  try {
+    const client = getRedisClient();
+    if (!client.isOpen) {
+      await client.connect();
+    }
+  } catch (error) {
+    // Connection failed - error is already logged by error handler
+    // Don't throw to allow app to continue without Redis
   }
 };
 
 export const disconnectRedis = async (): Promise<void> => {
-  if (redisClient && redisClient.isOpen) {
-    await redisClient.quit();
+  try {
+    if (redisClient && redisClient.isOpen) {
+      await redisClient.quit();
+      redisClient = null;
+    }
+  } catch (error) {
+    // Ignore disconnect errors
     redisClient = null;
   }
 };
@@ -72,44 +92,70 @@ export const setWithTTL = async (
   value: string,
   ttlSeconds: number
 ): Promise<void> => {
-  const client = getRedisClient();
-  if (!client.isOpen) {
-    await client.connect();
+  try {
+    const client = getRedisClient();
+    if (!client.isOpen) {
+      await client.connect();
+    }
+    await client.setEx(key, ttlSeconds, value);
+  } catch (error) {
+    // Silently fail if Redis is unavailable - app can continue without Redis
+    // Error is already logged by the error handler
+    // Don't throw - let caller handle fallback
   }
-  await client.setEx(key, ttlSeconds, value);
 };
 
 export const get = async (key: string): Promise<string | null> => {
-  const client = getRedisClient();
-  if (!client.isOpen) {
-    await client.connect();
+  try {
+    const client = getRedisClient();
+    if (!client.isOpen) {
+      await client.connect();
+    }
+    return await client.get(key);
+  } catch (error) {
+    // Return null if Redis is unavailable
+    return null;
   }
-  return await client.get(key);
 };
 
 export const del = async (key: string): Promise<number> => {
-  const client = getRedisClient();
-  if (!client.isOpen) {
-    await client.connect();
+  try {
+    const client = getRedisClient();
+    if (!client.isOpen) {
+      await client.connect();
+    }
+    return await client.del(key);
+  } catch (error) {
+    // Return 0 if Redis is unavailable (key not deleted)
+    return 0;
   }
-  return await client.del(key);
 };
 
 export const exists = async (key: string): Promise<boolean> => {
-  const client = getRedisClient();
-  if (!client.isOpen) {
-    await client.connect();
+  try {
+    const client = getRedisClient();
+    if (!client.isOpen) {
+      await client.connect();
+    }
+    const result = await client.exists(key);
+    return result === 1;
+  } catch (error) {
+    // Return false if Redis is unavailable
+    return false;
   }
-  const result = await client.exists(key);
-  return result === 1;
 };
 
 export const getTTL = async (key: string): Promise<number> => {
-  const client = getRedisClient();
-  if (!client.isOpen) {
-    await client.connect();
+  try {
+    const client = getRedisClient();
+    if (!client.isOpen) {
+      await client.connect();
+    }
+    return await client.ttl(key);
+  } catch (error) {
+    // Return -2 (key doesn't exist) if Redis is unavailable
+    return -2;
   }
-  return await client.ttl(key);
 };
 
 /**
@@ -117,20 +163,25 @@ export const getTTL = async (key: string): Promise<number> => {
  * @param key - Redis key
  * @param value - Value to set
  * @param ttlSeconds - Time to live in seconds
- * @returns true if key was set, false if key already exists
+ * @returns true if key was set, false if key already exists or Redis is unavailable
  */
 export const setNxWithTTL = async (
   key: string,
   value: string,
   ttlSeconds: number
 ): Promise<boolean> => {
-  const client = getRedisClient();
-  if (!client.isOpen) {
-    await client.connect();
+  try {
+    const client = getRedisClient();
+    if (!client.isOpen) {
+      await client.connect();
+    }
+    const result = await client.set(key, value, {
+      EX: ttlSeconds,
+      NX: true,
+    });
+    return result === 'OK';
+  } catch (error) {
+    // Return false if Redis is unavailable
+    return false;
   }
-  const result = await client.set(key, value, {
-    EX: ttlSeconds,
-    NX: true,
-  });
-  return result === 'OK';
 };

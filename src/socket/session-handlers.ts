@@ -212,13 +212,11 @@ export const handleSessionStop = async (
     };
 
     // Persist completed session to database (with idempotency)
-    try {
-      const persisted = await persistCompletedSession(finalSession);
+    const persisted = await persistCompletedSession(finalSession);
+    if (persisted) {
       console.log(`Session persisted: ${persisted.id} (created: ${persisted.created})`);
-    } catch (error) {
-      console.error('Failed to persist session to database:', error);
-      // Continue with cleanup even if persistence fails
     }
+    // Continue with cleanup even if persistence fails (persisted will be null)
 
     // Stop timer
     stopSessionTimer(userId);
