@@ -4,7 +4,7 @@
   "description": "Node.js + TypeScript backend",
   "main": "dist/server.js",
   "scripts": {
-    "build": "tsc",
+    "build": "tsc -p tsconfig.backend.json",
     "start": "node dist/server.js",
     "dev": "ts-node-dev --respawn --transpile-only src/server.ts",
     "type-check": "tsc --noEmit",
