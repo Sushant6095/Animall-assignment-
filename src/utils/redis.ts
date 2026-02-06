@@ -16,6 +16,7 @@ export const getRedisClient = (): RedisClientType => {
     socket: {
       host: config.redisHost,
       port: config.redisPort,
+      connectTimeout: 2000, // 2 second connection timeout
       reconnectStrategy: (retries) => {
         // Stop reconnecting after 3 attempts to reduce spam
         if (retries > 3) {
@@ -109,23 +110,23 @@ export const get = async (key: string): Promise<string | null> => {
   try {
     const client = getRedisClient();
     if (!client.isOpen) {
-      // Add timeout for connection attempt
+      // Add timeout for connection attempt (fail fast)
       await Promise.race([
         client.connect(),
-        new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('Redis connection timeout')), 2000)
+        new Promise<never>((_, reject) => 
+          setTimeout(() => reject(new Error('Redis connection timeout')), 1500)
         )
       ]);
     }
-    // Add timeout for get operation
+    // Add timeout for get operation (fail fast)
     return await Promise.race([
       client.get(key),
       new Promise<string | null>((_, reject) => 
-        setTimeout(() => reject(new Error('Redis get operation timeout')), 2000)
+        setTimeout(() => reject(new Error('Redis get operation timeout')), 1500)
       )
     ]);
   } catch (error) {
-    // Return null if Redis is unavailable
+    // Return null if Redis is unavailable - this is expected behavior
     return null;
   }
 };

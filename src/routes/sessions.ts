@@ -86,7 +86,8 @@ router.get('/sessions', async (req: Request, res: Response) => {
     console.log(`[Sessions] Fetching from database for userId: ${userId}`);
     let sessions = [];
     try {
-      sessions = await withTimeout(
+      // Use Promise.race for more reliable timeout
+      sessions = await Promise.race([
         prisma.milkingSession.findMany({
           where: {
             userId: userId,
@@ -95,9 +96,10 @@ router.get('/sessions', async (req: Request, res: Response) => {
             startTime: 'desc', // Sort by startTime descending (newest first)
           },
         }),
-        4000, // 4 second timeout for database (reduced from 5s)
-        'Database query timed out'
-      );
+        new Promise<never[]>((_, reject) => 
+          setTimeout(() => reject(new Error('Database query timed out')), 3000) // 3 second timeout
+        )
+      ]);
       console.log(`[Sessions] Database query successful, found ${sessions.length} sessions`);
 
       // Cache the result in Redis with TTL (if we got data) - don't wait for this
